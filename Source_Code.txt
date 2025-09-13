@@ -1,0 +1,60 @@
+import gradio as gr
+import torch, random
+from diffusers import StableDiffusionPipeline
+from transformers import pipeline
+
+# ----------------- Image Generation -----------------
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Load Stable Diffusion once
+pipe = StableDiffusionPipeline.from_pretrained(
+    "runwayml/stable-diffusion-v1-5",
+    torch_dtype=torch.float16 if device == "cuda" else torch.float32
+).to(device)
+
+def generate_image(prompt, negative_prompt, steps, guidance, seed):
+    seed = int(seed) if seed is not None else 0
+    generator = torch.Generator(device=device).manual_seed(seed)
+    image = pipe(
+        prompt,
+        negative_prompt=negative_prompt,
+        num_inference_steps=steps,
+        guidance_scale=guidance,
+        generator=generator
+    ).images[0]
+    return image
+
+# ----------------- Music Generation -----------------
+# Load MusicGen (medium model is a good trade-off)
+music_pipe = pipeline("text-to-audio", model="facebook/musicgen-small")
+
+def generate_music(prompt, duration_sec):
+    out = music_pipe(prompt, forward_params={"max_new_tokens": duration_sec * 50})  # approx
+    audio_path = "music_out.wav"
+    import soundfile as sf
+    sf.write(audio_path, out["audio"], out["sampling_rate"])
+    return audio_path
+
+# ----------------- Gradio UI -----------------
+with gr.Blocks() as demo:
+    gr.Markdown("# 🎨 Vision & 🎵 Sound Generator\nGenerate **images** or **music** from text prompts.")
+    
+    with gr.Tab("Text-to-Image"):
+        prompt = gr.Textbox(label="Prompt", value="a watercolor painting of a mountain at sunrise")
+        neg = gr.Textbox(label="Negative Prompt", value="blurry, low quality")
+        steps = gr.Slider(10, 50, value=25, step=1, label="Steps")
+        guidance = gr.Slider(1.0, 12.0, value=7.5, step=0.5, label="Guidance Scale")
+        seed = gr.Number(value=random.randint(0, 10_000), label="Seed")
+        btn_img = gr.Button("Generate Image")
+        out_img = gr.Image(label="Result", type="pil")
+        btn_img.click(generate_image, [prompt, neg, steps, guidance, seed], out_img)
+
+    with gr.Tab("Text-to-Music"):
+        m_prompt = gr.Textbox(label="Prompt", value="lo-fi chill, warm pads, 90 bpm")
+        duration = gr.Slider(5, 20, value=10, step=1, label="Duration (sec)")
+        btn_music = gr.Button("Generate Music")
+        out_audio = gr.Audio(label="Result", type="filepath")
+        btn_music.click(generate_music, [m_prompt, duration], out_audio)
+
+if __name__ == "__main__":
+    demo.launch()
